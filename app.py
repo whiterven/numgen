@@ -27,6 +27,9 @@ logging.basicConfig(
 
 # Telegram Bot Token
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+if not TELEGRAM_BOT_TOKEN:
+    logging.error("TELEGRAM_BOT_TOKEN not found in environment variables!")
+    sys.exit(1)
 
 # Twilio credentials
 ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
@@ -602,19 +605,31 @@ def create_redis_client():
 def home():
     return jsonify({
         "status": "running",
-        "message": "One Caller Bot is active"
+        "message": "One Caller Bot is active",
+        "bot_info": f"Bot username: {bot.get_me().username}"
     }), 200
 
 def run_flask():
+    """Run Flask server"""
     port = int(os.environ.get('PORT', 5000))
     web_app.run(host='0.0.0.0', port=port)
 
+def run_telegram_bot():
+    """Run Telegram bot polling"""
+    logging.info("Starting Telegram bot polling...")
+    try:
+        # Remove any existing webhook
+        bot.remove_webhook()
+        
+        # Start polling
+        bot.polling(none_stop=True, interval=0, timeout=20)
+    except Exception as e:
+        logging.error(f"Telegram bot polling error: {e}")
 
 def signal_handler(signum, frame):
     """Handle shutdown gracefully."""
     logging.info("Shutting down bot...")
     print("\n👋 Bot shutdown requested. Cleaning up...")
-    # Close any active connections
     try:
         bot.stop_polling()
     except:
@@ -627,26 +642,14 @@ signal.signal(signal.SIGTERM, signal_handler)
 
 def main():
     """Main function to run the bot with enhanced error handling."""
+    logging.info("Initializing One Caller Bot...")
+
     # Start Flask in a separate thread
-    flask_thread = threading.Thread(target=run_flask)
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
 
-    logging.info("Starting One Caller Bot...")
-
-    # Check if webhook is set and remove it
-    if bot.get_webhook_info().url:
-        bot.remove_webhook()
-        logging.info("Webhook removed.")
-
-    while True:
-        try:
-            bot.polling(none_stop=True, interval=0, timeout=20)
-        except KeyboardInterrupt:
-            signal_handler(signal.SIGINT, None)
-        except Exception as e:
-            logging.error(f"Bot polling error: {e}")
-            time.sleep(15)
-            continue
+    # Start Telegram bot in the main thread
+    run_telegram_bot()
 
 if __name__ == '__main__':
     main()
