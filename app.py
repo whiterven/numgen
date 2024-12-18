@@ -646,11 +646,10 @@ def main():
     bot.remove_webhook() # Clean up any existing webhook
     bot.set_webhook(url=webhook_url)
     logging.info(f"Telegram webhook set to: {webhook_url}")
-    
+
     # Run Flask - this is now the entrypoint
     port = int(os.environ.get('PORT', 5000))
-    web_app.run(host='0.0.0.0', port=port) # Run in the main thread
-
+    web_app.run(host='0.0.0.0', port=port)  # Run in the main thread
 
 if __name__ == '__main__':
     main()
