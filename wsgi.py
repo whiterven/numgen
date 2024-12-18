@@ -24,6 +24,5 @@ if __name__ == "__main__":
             logging.error(f"Failed to set webhook: {e}")
     else:
           logging.info("Running locally without webhook")
-          # bot.polling(non_stop=True) # Use polling for local testing
     
     application.run(host='0.0.0.0', port=port)
