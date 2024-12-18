@@ -100,7 +100,7 @@ SERVICE_OPTIONS = [
     ("📧 Gmail", "gmail"),
     ("✉️ Yahoo Mail", "yahoomail"),
     ("📫 Outlook Mail", "outlookmail"),
-    ("💳 Stripe, "stripe")
+    ("💳 Stripe", "stripe")
 ]
 
 BANKS_PER_PAGE = 8
