@@ -1,4 +1,4 @@
-from app import web_app
+from app import web_app as application
 
 if __name__ == "__main__":
-    web_app.run()
+    application.run()
