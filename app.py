@@ -4,7 +4,7 @@ import logging
 import signal
 import sys
 import time
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 import telebot
 from twilio.rest import Client
 from twilio.twiml.voice_response import VoiceResponse
@@ -609,29 +609,26 @@ def home():
         "bot_info": f"Bot username: {bot.get_me().username}"
     }), 200
 
-def run_flask():
-    """Run Flask server"""
-    port = int(os.environ.get('PORT', 5000))
-    web_app.run(host='0.0.0.0', port=port)
+# Add webhook endpoint
+@web_app.route('/' + TELEGRAM_BOT_TOKEN, methods=['POST'])
+def telegram_webhook():
+    """Handle incoming Telegram updates."""
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return '', 200
+    else:
+        return 'Error: Not a JSON request', 403
 
-def run_telegram_bot():
-    """Run Telegram bot polling"""
-    logging.info("Starting Telegram bot polling...")
-    try:
-        # Remove any existing webhook
-        bot.remove_webhook()
-        
-        # Start polling
-        bot.polling(none_stop=True, interval=0, timeout=20)
-    except Exception as e:
-        logging.error(f"Telegram bot polling error: {e}")
+
 
 def signal_handler(signum, frame):
     """Handle shutdown gracefully."""
     logging.info("Shutting down bot...")
     print("\n👋 Bot shutdown requested. Cleaning up...")
     try:
-        bot.stop_polling()
+        bot.remove_webhook()  # Remove the webhook on shutdown
     except:
         pass
     sys.exit(0)
@@ -643,13 +640,17 @@ signal.signal(signal.SIGTERM, signal_handler)
 def main():
     """Main function to run the bot with enhanced error handling."""
     logging.info("Initializing One Caller Bot...")
+    
+    # Set webhook
+    webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TELEGRAM_BOT_TOKEN}" # Correctly use RENDER_EXTERNAL_HOSTNAME
+    bot.remove_webhook() # Clean up any existing webhook
+    bot.set_webhook(url=webhook_url)
+    logging.info(f"Telegram webhook set to: {webhook_url}")
 
-    # Start Flask in a separate thread
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
+    # Run Flask - this is now the entrypoint
+    port = int(os.environ.get('PORT', 5000))
+    web_app.run(host='0.0.0.0', port=port) # Run in the main thread
 
-    # Start Telegram bot in the main thread
-    run_telegram_bot()
 
 if __name__ == '__main__':
     main()
