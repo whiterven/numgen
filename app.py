@@ -1,7 +1,6 @@
 import os
 import threading
 import logging
-import signal
 import sys
 import time
 from flask import Flask, jsonify, request
@@ -136,6 +135,11 @@ def create_verification_type_keyboard():
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     """Handle /start command."""
+    chat_id = message.chat.id
+    # Clear any existing state for this user.
+    if chat_id in user_states:
+       del user_states[chat_id]
+
     welcome_text = (
         "🎯 Welcome to *OneCaller*!\n\n"
         "I can help you verify phone numbers through voice calls.\n\n"
@@ -629,18 +633,3 @@ def telegram_webhook():
         return '', 200
     else:
         return 'Error: Not a JSON request', 403
-
-def signal_handler(signum, frame):
-    """Handle shutdown gracefully."""
-    logging.info("Shutting down bot...")
-    print("\n👋 Bot shutdown requested. Cleaning up...")
-    try:
-        bot.remove_webhook()
-    except:
-        pass
-    call_executor.shutdown(wait=False)  # Shutdown executor without waiting
-    sys.exit(0)
-
-# Register signal handlers
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
