@@ -3,5 +3,6 @@ twilio
 phonenumbers
 python-dotenv
 redis
-flask
+Flask
 telebot
+gunicorn
