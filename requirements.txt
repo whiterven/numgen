@@ -1,0 +1,7 @@
+pyTelegramBotAPI
+twilio
+phonenumbers
+python-dotenv
+redis
+flask
+telebot
