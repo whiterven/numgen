@@ -6,3 +6,4 @@ redis
 Flask
 telebot
 gunicorn
+paste
