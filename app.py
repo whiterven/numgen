@@ -4,7 +4,7 @@ import logging
 import signal
 import sys
 import time
-from flask import Flask
+from flask import Flask, jsonify
 import telebot
 from twilio.rest import Client
 from twilio.twiml.voice_response import VoiceResponse
@@ -49,9 +49,9 @@ active_calls = {}
 # Bank and Service options (your existing lists)
 BANK_OPTIONS = [
     "JPMorgan Chase", "Citibank", "Goldman Sachs", "TD Bank", "Citizens Bank",
-    "Morgan Stanley", "KeyBank", "Bank of America", "U.S. Bank", "Truist",
-    "BMO Harris", "Fifth Third", "Huntington", "Ally Bank", "Wells Fargo",
-    "PNC Bank", "Capital One", "First Citizens", "M&T Bank", "American Express", "Paypal", "Coinbase"
+    "Morgan Stanley", "KeyBank", "Bank of America Financial", "U.S. Bank Branch", "Truist",
+    "BMO Harris Bank", "Fifth Third Bank", "Huntington Bank", "Ally Bank", "Wells Fargo Bank",
+    "PNC Bank", "Capital One Bank", "First Citizens Bank", "M&T Bank", "American Express", "Paypal", "Coinbase"
 ]
 
 SERVICE_OPTIONS = [
@@ -596,6 +596,14 @@ def create_redis_client():
         logging.error(f"Redis connection error: {e}")
         return None
 
+
+# Flask route for health check
+@web_app.route('/')
+def home():
+    return jsonify({
+        "status": "running",
+        "message": "One Caller Bot is active"
+    }), 200
 
 def run_flask():
     port = int(os.environ.get('PORT', 5000))
