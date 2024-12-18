@@ -1,4 +1,4 @@
-from paste import application
+from paste import web_app
 
 # Import the Flask app
 web_app = application.web_app
