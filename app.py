@@ -48,13 +48,37 @@ REDIS_SOCKET_TIMEOUT = 5
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
 # Set webhook on module import
-webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TELEGRAM_BOT_TOKEN}"
-try:
-    bot.remove_webhook()
-    bot.set_webhook(url=webhook_url)
-    logging.info(f"Telegram webhook set to: {webhook_url}")
-except Exception as e:
-    logging.error(f"Failed to set webhook: {e}")
+# Enhanced webhook setup
+def setup_webhook():
+    webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TELEGRAM_BOT_TOKEN}"
+    try:
+        # First get current webhook info
+        webhook_info = bot.get_webhook_info()
+        logging.info(f"Current webhook info: {webhook_info}")
+        
+        # Remove existing webhook
+        bot.remove_webhook()
+        logging.info("Removed existing webhook")
+        
+        # Set new webhook with proper parameters
+        bot.set_webhook(
+            url=webhook_url,
+            max_connections=40,
+            allowed_updates=["message", "callback_query"],
+            drop_pending_updates=True
+        )
+        
+        # Verify webhook is set correctly
+        new_webhook_info = bot.get_webhook_info()
+        logging.info(f"New webhook info: {new_webhook_info}")
+        return True
+            
+    except Exception as e:
+        logging.error(f"Failed to set webhook: {e}")
+        return False
+
+# Initial webhook setup attempt
+setup_webhook()
 
 # User state storage with call tracking
 user_states = {}
