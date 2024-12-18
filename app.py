@@ -606,7 +606,7 @@ def home():
     return jsonify({
         "status": "running",
         "message": "One Caller Bot is active",
-        "bot_info": f"Bot username: {bot.get_me().username}"
+         "bot_info":  "Bot information not retrieved on this route"
     }), 200
 
 # Add webhook endpoint
@@ -640,13 +640,13 @@ signal.signal(signal.SIGTERM, signal_handler)
 def main():
     """Main function to run the bot with enhanced error handling."""
     logging.info("Initializing One Caller Bot...")
-    
+
     # Set webhook
-    webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TELEGRAM_BOT_TOKEN}" # Correctly use RENDER_EXTERNAL_HOSTNAME
+    webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TELEGRAM_BOT_TOKEN}"
     bot.remove_webhook() # Clean up any existing webhook
     bot.set_webhook(url=webhook_url)
     logging.info(f"Telegram webhook set to: {webhook_url}")
-
+    
     # Run Flask - this is now the entrypoint
     port = int(os.environ.get('PORT', 5000))
     web_app.run(host='0.0.0.0', port=port) # Run in the main thread
