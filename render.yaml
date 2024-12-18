@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: onecaller-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python onecaller.py
+    autoDeploy: false
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
+      - key: TWILIO_FUNCTION_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
